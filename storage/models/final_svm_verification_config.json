@@ -1,0 +1,58 @@
+{
+  "config_type": "final_svm_verification_config",
+  "model_type": "SVM",
+  "model_path": "storage/models/final_svm.joblib",
+  "model_config_path": "storage/models/final_svm_config.json",
+  "threshold_calibration_path": "storage\\models\\final_svm_threshold_calibration.json",
+  "selected_threshold": 0.55,
+  "optimization_metric": "balanced_accuracy",
+  "model_configuration": {
+    "kernel": "rbf",
+    "C": 3.0,
+    "gamma": "scale",
+    "class_weight": "balanced",
+    "probability": true,
+    "random_seed": 42
+  },
+  "profile_type_for_evaluation": "holdout_multi_prototype",
+  "profile_type_for_inference": "multi_prototype",
+  "input_dim": 836,
+  "spectral_dim": 86,
+  "vocal_dim": 192,
+  "input_structure": [
+    "track_spectral",
+    "prototype_spectral",
+    "spectral_difference",
+    "track_vocal",
+    "prototype_vocal",
+    "vocal_difference",
+    "has_track_vocal",
+    "has_prototype_vocal"
+  ],
+  "artifact_features_used_as_model_input": false,
+  "artifact_input_dim": 0,
+  "score_aggregation": "max_across_prototypes",
+  "decision_rule": {
+    "authentic": "score >= 0.55",
+    "not_authentic": "score < 0.55"
+  },
+  "best_validation_metrics": {
+    "threshold": 0.55,
+    "accuracy": 0.9581005586592178,
+    "precision": 0.9456521739130435,
+    "recall": 0.9720670391061452,
+    "specificity": 0.9441340782122905,
+    "f1_score": 0.9586776859504132,
+    "balanced_accuracy": 0.9581005586592178,
+    "confusion_matrix": {
+      "true_positive": 174,
+      "true_negative": 169,
+      "false_positive": 10,
+      "false_negative": 5
+    },
+    "positive_count": 179,
+    "negative_count": 179,
+    "predicted_positive_count": 184,
+    "predicted_negative_count": 174
+  }
+}

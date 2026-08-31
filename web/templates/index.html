@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAV — Music Authenticity Verification</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="#verify"><span>M</span><strong>MAV</strong></a>
+    <nav>
+        <a href="#verify">Перевірка</a>
+        <a href="#library">Бібліотека</a>
+        <a href="#manage">Додавання</a>
+        <button type="button" class="link-button" data-open-history>Історія</button>
+    </nav>
+    <div class="model-status {{ 'ready' if stats.model_ready else '' }}">
+        <i></i>
+        {{ 'SVM готова' if stats.model_ready else 'SVM недоступна' }}
+    </div>
+</header>
+
+<main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="messages">
+                {% for category, message in messages %}
+                    <div class="message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <section class="hero" id="verify">
+        <div>
+            <span class="eyebrow">Local thesis demo</span>
+            <h1>Автентифікація авторського виконання</h1>
+            <p class="lead">Оберіть трек із бібліотеки та одного або кількох виконавців для порівняння. Результати сортуються за спаданням score і зберігаються в історію.</p>
+            <div class="stats">
+                <div><strong>{{ stats.artists_count }}</strong><span>виконавців</span></div>
+                <div><strong>{{ stats.tracks_count }}</strong><span>треків</span></div>
+                <div><strong>{{ stats.profiles_count }}</strong><span>профілів</span></div>
+                <div><strong>{{ stats.history_count }}</strong><span>перевірок</span></div>
+            </div>
+        </div>
+
+        <form method="post" class="panel form processing-form">
+            <input type="hidden" name="action" value="verify_existing">
+            <h2>Перевірити трек</h2>
+
+            <label>Досліджуваний трек</label>
+            <select name="query_track" required>
+                {% for track in track_choices %}
+                    <option value="{{ track.value }}">{{ track.label }}</option>
+                {% endfor %}
+            </select>
+
+            <label>Виконавці для порівняння</label>
+            <div class="check-grid">
+                {% for artist in artists %}
+                    <label class="check-card">
+                        <input type="checkbox" name="target_artist_ids" value="{{ artist.artist_id }}">
+                        <span>{{ artist.name }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+
+            <button class="primary-button loading-button" type="submit">Запустити перевірку</button>
+        </form>
+    </section>
+
+    {% if verification_results %}
+        <section class="section" id="results">
+            <div class="section-title">
+                <span class="eyebrow">Result</span>
+                <h2>Результати перевірки</h2>
+            </div>
+            <div class="results-grid">
+                {% for result in verification_results %}
+                    <article class="result-card {{ 'positive' if result.decision == 'authentic' else 'negative' }}">
+                        <div class="score"><strong>{{ "%.1f"|format(result.score_percent) }}</strong><span>%</span></div>
+                        <div>
+                            <h3>{{ result.target_artist_name }}</h3>
+                            <p>{{ result.query_artist_name }} — {{ result.query_track_title }}</p>
+                            <div class="meta-row">
+                                <span>Decision: <b>{{ 'Відповідає' if result.decision == 'authentic' else 'Не відповідає' }}</b></span>
+                                <span>Threshold: <b>{{ "%.2f"|format(result.threshold) }}</b></span>
+                                <span>Best prototype: <b>{{ result.best_prototype_id }}</b></span>
+                            </div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    <section class="section" id="library">
+        <div class="section-title row-title">
+            <div>
+                <span class="eyebrow">Library</span>
+                <h2>Бібліотека</h2>
+            </div>
+            <span class="muted">Керування виконавцями, альбомами, синглами та профілями</span>
+        </div>
+
+        <div class="artist-list">
+            {% for artist in artists %}
+                <article class="artist-block">
+                    <div class="artist-head">
+                        {% if artist.cover_url %}
+                            <img src="{{ artist.cover_url }}" alt="{{ artist.name }}">
+                        {% else %}
+                            <div class="placeholder">{{ artist.name[:1] }}</div>
+                        {% endif %}
+                        <div>
+                            <h3>{{ artist.name }}</h3>
+                            <p>{{ artist.tracks_count }} треків · {{ artist.reference_tracks_count }} reference · {{ artist.albums|length }} альбомів</p>
+                            <span class="badge {{ 'ready' if artist.profile_ready else '' }}">{{ 'Profile ready' if artist.profile_ready else 'No profile' }}</span>
+                        </div>
+                        <div class="actions">
+                            <form method="post" class="inline-form processing-form">
+                                <input type="hidden" name="action" value="build_profile">
+                                <input type="hidden" name="profile_artist_id" value="{{ artist.artist_id }}">
+                                <button class="small-button loading-button">Побудувати профіль</button>
+                            </form>
+                            <form method="post" class="inline-form danger-form">
+                                <input type="hidden" name="action" value="delete_artist">
+                                <input type="hidden" name="artist_id" value="{{ artist.artist_id }}">
+                                <button class="small-button danger">Видалити</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <details>
+                        <summary>Фото / сингли / альбоми</summary>
+
+                        <form method="post" enctype="multipart/form-data" class="mini-form">
+                            <input type="hidden" name="action" value="update_cover">
+                            <input type="hidden" name="entity" value="artist">
+                            <input type="hidden" name="artist_id" value="{{ artist.artist_id }}">
+                            <input type="file" name="cover_file" accept="image/*" required>
+                            <button class="small-button">Оновити фото</button>
+                        </form>
+
+                        <h4>Сингли</h4>
+                        <div class="track-list">
+                            {% for track in artist.singles %}
+                                {% include 'track_row.html' %}
+                            {% else %}
+                                <p class="muted">Синглів немає.</p>
+                            {% endfor %}
+                        </div>
+
+                        <h4>Альбоми</h4>
+                        {% for album in artist.albums %}
+                            <div class="album-box">
+                                <div class="album-head">
+                                    <div class="album-title">
+                                        {% if album.cover_url %}
+                                            <img src="{{ album.cover_url }}" alt="{{ album.title }}" class="album-cover">
+                                        {% else %}
+                                            <div class="album-cover placeholder"> {{ album.title[:1] }} </div>
+                                        {% endif %}
+                                        <strong>{{ album.title }}</strong>
+                                    </div>
+                                    <div class="actions">
+                                        <form method="post" class="inline-form processing-form">
+                                            <input type="hidden" name="action" value="process_album">
+                                            <input type="hidden" name="artist_id" value="{{ artist.artist_id }}">
+                                            <input type="hidden" name="album_id" value="{{ album.album_id }}">
+                                            <button class="small-button loading-button">Обробити альбом</button>
+                                        </form>
+                                        <form method="post" class="inline-form danger-form">
+                                            <input type="hidden" name="action" value="delete_album">
+                                            <input type="hidden" name="artist_id" value="{{ artist.artist_id }}">
+                                            <input type="hidden" name="album_id" value="{{ album.album_id }}">
+                                            <button class="small-button danger">Видалити альбом</button>
+                                        </form>
+                                    </div>
+                                </div>
+
+                                <form method="post" enctype="multipart/form-data" class="mini-form">
+                                    <input type="hidden" name="action" value="update_cover">
+                                    <input type="hidden" name="entity" value="album">
+                                    <input type="hidden" name="artist_id" value="{{ artist.artist_id }}">
+                                    <input type="hidden" name="album_id" value="{{ album.album_id }}">
+                                    <input type="file" name="cover_file" accept="image/*" required>
+                                    <button class="small-button">Оновити обкладинку</button>
+                                </form>
+
+                                <div class="track-list">
+                                    {% for track in album.tracks %}
+                                        {% include 'track_row.html' %}
+                                    {% else %}
+                                        <p class="muted">Треків немає.</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% else %}
+                            <p class="muted">Альбомів немає.</p>
+                        {% endfor %}
+                    </details>
+                </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section" id="manage">
+        <div class="section-title">
+            <span class="eyebrow">Manage</span>
+            <h2>Додавання даних</h2>
+        </div>
+
+        <div class="manage-grid">
+            <form method="post" enctype="multipart/form-data" class="panel form artist-form">
+                <input type="hidden" name="action" value="create_artist">
+                <h3>Додати виконавця</h3>
+                <label>Назва</label>
+                <input type="text" name="artist_name" required>
+                <label>Фото</label>
+                <input type="file" name="artist_cover" accept="image/*">
+                <button class="secondary-button">Створити</button>
+            </form>
+
+            <form method="post" enctype="multipart/form-data" class="panel form processing-form">
+                <input type="hidden" name="action" value="add_single">
+                <h3>Додати сингл</h3>
+                <label>Виконавець</label>
+                <select name="single_artist_id" required>
+                    {% for artist in artists %}<option value="{{ artist.artist_id }}">{{ artist.name }}</option>{% endfor %}
+                </select>
+                <label>Аудіофайл</label>
+                <input class="title-source" type="file" name="single_audio" accept=".mp3,.wav,.flac,.m4a,.ogg" data-title-target="single_title" required>
+                <label>Назва треку</label>
+                <input id="single_title" type="text" name="single_title" placeholder="Підтягнеться з файлу">
+                <label>Обкладинка</label>
+                <input type="file" name="single_cover" accept="image/*">
+                <label class="check-line"><input type="checkbox" name="single_is_reference" checked> Reference track</label>
+                <button class="secondary-button loading-button">Додати й обробити</button>
+            </form>
+
+            <form method="post" enctype="multipart/form-data" class="panel form wide processing-form" id="album-upload-form">
+                <input type="hidden" name="action" value="create_album_with_tracks">
+                <h3>Додати альбом або треки до альбому</h3>
+                <div class="two-cols">
+                    <div>
+                        <label>Виконавець</label>
+                        <select name="album_artist_id" required>
+                            {% for artist in artists %}<option value="{{ artist.artist_id }}">{{ artist.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label>Назва альбому</label>
+                        <input type="text" name="album_title" required>
+                    </div>
+                </div>
+                <label>Обкладинка</label>
+                <input type="file" name="album_cover" accept="image/*">
+                <label>Треки альбому</label>
+                <input id="album_tracks" type="file" name="album_tracks" accept=".mp3,.wav,.flac,.m4a,.ogg" multiple>
+                <div id="album-track-editor" class="track-editor"></div>
+                <label class="check-line"><input type="checkbox" name="process_album_after_upload"> Обробити після додавання</label>
+                <button class="secondary-button loading-button">Додати</button>
+            </form>
+        </div>
+    </section>
+</main>
+
+<div class="modal" id="history-modal" hidden>
+    <div class="modal-card">
+        <div class="modal-head">
+            <h2>Історія перевірок</h2>
+            <button type="button" class="icon-button" data-close-history>×</button>
+        </div>
+        {% if history %}
+            <div class="history-list">
+                {% for item in history %}
+                    <details class="history-item">
+                        <summary>
+                            <span>{{ item.created_at }}</span>
+                            <strong>{{ item.query_track.artist_name }} — {{ item.query_track.title }}</strong>
+                        </summary>
+                        <div class="history-results">
+                            {% for result in item.results %}
+                                <div class="history-result">
+                                    <div>
+                                        <b>{{ result.target_artist_name }}</b>
+                                        <span>
+                                            {{ 'Відповідає' if result.decision == 'authentic'
+                                            else 'Не відповідає' }}
+                                        </span>
+                                    </div>
+
+                                    <div class="history-details">
+                                       <span>Результат: {{ "%.1f"|format(result.score_percent) }}%</span>
+                                        <span>
+                                            Спектральна схожість:
+                                            {% if result.spectral_similarity is defined and result.spectral_similarity is not none %}
+                                                {{ "%.1f"|format(result.spectral_similarity * 100) }}%
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </span>
+                                        <span>
+                                            Вокальна схожість:
+                                            {% if result.vocal_similarity is defined and result.vocal_similarity is not none %}
+                                                {{ "%.1f"|format(result.vocal_similarity * 100) }}%
+                                            {% else %}
+                                                —
+                                            {% endif %}
+                                        </span>
+                                       <span>Поріг: {{ "%.1f"|format(result.threshold * 100) }}%</span>
+                                       <span>Прототип: {{ result.best_prototype_id }}</span>
+                                    </div>
+
+                                    {% if result.prototype_scores %}
+                                        <div class="prototype-scores">
+                                            {% for prototype in result.prototype_scores %}
+                                                <span>
+                                                    {{ prototype.prototype_id }}:
+                                                    {{ "%.1f"|format(
+                                                        (prototype.svm_score
+                                                        if prototype.svm_score is defined
+                                                        else prototype.score) * 100
+                                                    ) }}%
+                                                </span>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                {% endfor %}
+            </div>
+            <form method="post" class="danger-form right">
+                <input type="hidden" name="action" value="clear_history">
+                <button class="small-button danger">Очистити історію</button>
+            </form>
+        {% else %}
+            <p class="muted">Історія порожня.</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function cleanTitle(filename) {
+    let name = filename.replace(/^.*[\\\/]/, '').replace(/\.[^.]+$/, '').replaceAll('_', ' ').trim();
+    name = name.replace(/^\d+\s*[-.]\s*/, '');
+    return name;
+}
+
+document.querySelectorAll('.title-source').forEach(input => {
+    input.addEventListener('change', () => {
+        const target = document.getElementById(input.dataset.titleTarget);
+        if (target && input.files.length && !target.value.trim()) {
+            target.value = cleanTitle(input.files[0].name);
+        }
+    });
+});
+
+const albumInput = document.getElementById('album_tracks');
+const editor = document.getElementById('album-track-editor');
+if (albumInput && editor) {
+    albumInput.addEventListener('change', () => {
+        editor.innerHTML = '';
+        Array.from(albumInput.files).forEach((file, index) => {
+            const row = document.createElement('div');
+            row.className = 'track-edit-row';
+            row.innerHTML = `
+                <span>${index + 1}</span>
+                <input type="text" name="album_track_titles" value="${cleanTitle(file.name).replaceAll('"', '&quot;')}">
+                <label><input type="checkbox" name="album_track_reference" value="${index}" checked> reference</label>
+            `;
+            editor.appendChild(row);
+        });
+    });
+}
+
+document.querySelectorAll('.processing-form').forEach(form => {
+    form.addEventListener('submit', () => {
+        const button = form.querySelector('.loading-button');
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Обробка…';
+        }
+    });
+});
+
+document.querySelectorAll('.danger-form').forEach(form => {
+    form.addEventListener('submit', event => {
+        if (!confirm('Підтвердити видалення?')) event.preventDefault();
+    });
+});
+
+const modal = document.getElementById('history-modal');
+document.querySelectorAll('[data-open-history]').forEach(button => {
+    button.addEventListener('click', () => modal.hidden = false);
+});
+document.querySelectorAll('[data-close-history]').forEach(button => {
+    button.addEventListener('click', () => modal.hidden = true);
+});
+modal?.addEventListener('click', event => {
+    if (event.target === modal) modal.hidden = true;
+});
+
+{% if verification_results %}
+    document.getElementById('results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+{% endif %}
+</script>
+</body>
+</html>
